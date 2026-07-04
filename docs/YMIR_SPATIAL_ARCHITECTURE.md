@@ -1,6 +1,10 @@
 # Ymir — Spatial Engine Architecture and Schema
 
-**Version:** 1.0 · **Status:** Canon · **Session:** Deep architecture design · **Date:** 2026-07-04
+**Version:** 1.1 · **Status:** Canon · **Session:** Deep architecture design · **Date:** 2026-07-04
+
+**Changelog**
+- **1.1** — Rulings locked (see `RULINGS_NEEDED.md`); coordinate convention renamed `gardenos-local-si-v1` → `ymir-local-si-v1`; §4.4 validation aligned to centroid-containment ruling; Exposure type split into recorded observation vs. derived direction; positional versioning made explicit canon (change-log replay as authority for `property_at(date)`).
+- **1.0** — Initial release.
 
 ---
 
@@ -67,9 +71,11 @@ Every spatial object (Property, SpatialArea, PhysicalFeature) has a stable, immu
 
 ## 2. Spatial Coordinate System
 
-### 2.1 Canonical Coordinate Convention: `gardenos-local-si-v1`
+### 2.1 Canonical Coordinate Convention: `ymir-local-si-v1`
 
-Inherited from GardenOS, generalized for indoor and outdoor spaces:
+> **Provenance:** `ymir-local-si-v1` generalizes GardenOS's `gardenos-local-si-v1` convention **unchanged** — same units, axes, heading direction, polygon closure rule, and optional WGS84 anchor. Only the name changes, to reflect that the convention is now Ymir's own core canon rather than a garden-domain borrowing. GardenOS's original document (`docs/reference/spatial-model.md`) retains its own historical name as an inherited, read-only reference; it is not rewritten.
+
+Generalized for indoor and outdoor spaces:
 
 - **Units:** meters (length), square meters (area), cubic meters (volume)
 - **Axes:** +X east, +Y north, +Z up (Earth-relative for outdoor; preserves sanity for structures)
@@ -135,7 +141,7 @@ interface Property {
   bounding_box: BoundingBox;     // (derived)
   
   // Coordinate frame
-  coordinate_convention: "gardenos-local-si-v1";
+  coordinate_convention: "ymir-local-si-v1";
   wgs84_origin?: {
     longitude: number;
     latitude: number;
@@ -227,7 +233,7 @@ interface PhysicalFeature {
   
   // Identity & kind
   name: string;                  // "Apple Tree" or "Kitchen Island"
-  kind: FeatureKind;             // see enum below
+  kind: FeatureKind | `domain:${string}`; // core enum, OR a domain-namespaced string — see §3.3.1
   status: FeatureStatus;         // "active" | "removed" | "dormant" | "planned"
   
   // Spatial geometry
@@ -299,7 +305,18 @@ enum FeatureKind {
   HARDSCAPE = "hardscape",       // paving, mulch, etc.
   UNKNOWN = "unknown",
 }
+```
 
+#### 3.3.1 FeatureKind Extension Model (Hybrid — Locked, R-DOMAIN-001)
+
+`FeatureKind` is a **core enum plus an open, namespaced escape hatch** — not a closed enum requiring a schema version bump for every new kind, and not an unstructured free string either. This overrides the v1.0 draft's "closed enum for v1" recommendation.
+
+- The core enum above is Ymir's own vocabulary: universal-enough kinds that both garden and interior domains, and any future domain, are expected to reuse.
+- A domain that needs a kind not in the core enum uses the `domain:<name>` string pattern instead of waiting for a schema release — e.g., `"domain:irrigation_valve"`, `"domain:garden:trellis_wire"`. Ymir stores and indexes these identically to core-enum values; it does not validate the namespace contents.
+- **Why hybrid over closed-enum-only:** a closed enum means every new domain (irrigation, security, solar) blocks on a core schema bump before it can model anything. **Why hybrid over open-string-only:** an unstructured string loses the type safety and shared vocabulary that make cross-domain queries ("all trees on this property") meaningful — the core enum keeps the common vocabulary strong while the `domain:` prefix keeps extension unblocked.
+- Promotion path: a `domain:` kind that becomes common across domains (e.g., several domains all invent their own `domain:*_sensor`) is a candidate for promotion into the core enum in a future minor version. Promotion is additive and non-breaking — existing `domain:` values keep working.
+
+```typescript
 enum FeatureStatus {
   ACTIVE = "active",
   PLANNED = "planned",           // not yet built/planted
@@ -464,32 +481,41 @@ interface SpatialAdjacency {
 
 ### 4.3 Orientation and Exposure
 
-Sun exposure (outdoor) and daylighting (indoor) are properties of features and areas.
+Sun exposure (outdoor) and daylighting (indoor) are properties of features and areas — but they are not the same *kind* of fact, and the schema now keeps them apart:
+
+- **Observed light quality** is a first-class recorded fact: someone (or a future sensor/photo pipeline) has actually observed how a space behaves — "gets harsh afternoon sun," "reads as poor daylighting even with two windows." This is subjective, empirical, and worth persisting because geometry alone can't derive it (overhangs, neighboring trees, obstructions aren't always modeled).
+- **Directional exposure** — the cardinal-ish direction a wall/bed/window faces — is *always derivable* from the feature's `heading` plus its containing area's geometry. Storing it redundantly risks drift from the geometry it's supposed to describe. It is computed on demand, never persisted.
 
 ```typescript
-interface Exposure {
-  // Outdoor
-  primary_sun: "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW" | "full_sun" | "partial_shade" | "full_shade";
+// Recorded: what was actually observed. Persisted on the feature/area.
+interface ObservedLightQuality {
+  quality: "full_sun" | "partial_shade" | "full_shade" | "abundant" | "moderate" | "poor";
   seasonal_variation?: string;   // "southern exposure, full summer sun"
-  
-  // Indoor
-  window_count?: number;
-  daylighting?: "abundant" | "moderate" | "poor";
-  artificial_only?: boolean;
+  window_count?: number;         // indoor only
+  artificial_only?: boolean;     // indoor only
+  observed_at?: ISO8601;         // when this observation was made
+  source?: "user_observed" | "imported" | "sensor";
 }
+
+// Derived: computed from heading + containing geometry, never stored.
+// exposure_direction(feature_id): "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW"
+function exposure_direction(feature: PhysicalFeature): CardinalDirection
 ```
+
+`ObservedLightQuality` lives alongside a feature or area as an optional recorded attribute. `exposure_direction()` is a pure function of `position.heading` (see §2.1) — the same helper referenced in R-GEO-004's computed-cardinal ruling — applied uniformly outdoors (sun) and indoors (windows face a direction too). Consumers combine the derived direction with the recorded observation ("faces south" + "actually gets full sun") rather than treating one as a proxy for the other.
 
 ### 4.4 Validation Rules (Engine vs. Record)
 
 **Ymir validates these constraints:**
-- Every object is within its parent's geometry (no feature outside its containing area).
+- Every feature's **centroid** falls within its containing area's or parent feature's geometry; features whose centroid falls outside — or lands within a configurable boundary tolerance — are flagged with a warning, not rejected. An opt-in **strict mode** (per write, or per property) upgrades this to a hard rejection for consumers that want it (e.g., precise CAD-derived interior layouts). *(Locked per ruling R-CONSTRAINT-003 — see `RULINGS_NEEDED.md`; full bounding-box/polygon containment was considered and rejected as the default because complex container shapes, such as alcoved rooms, make exact polygon containment brittle.)*
 - Temporal envelopes are logically consistent (no "to" before "from").
-- Circular containment is forbidden.
+- Circular containment is forbidden (R-CONSTRAINT-002).
 - IDs are unique within property scope.
 - Required fields are present.
 
 **Ymir records but does not validate:**
-- Overlap of features (intentional in some garden layouts, forbidden in others).
+- Precise geometric containment (see above — centroid-checked with a warning, not enforced, unless strict mode is on).
+- Overlap of features (intentional in some garden layouts, forbidden in others) (R-CONSTRAINT-001).
 - Structural load-bearing and safety (engineer's problem).
 - Maintenance, care, or lifecycle rules (domain app's problem).
 
@@ -515,34 +541,51 @@ interface TemporalEnvelope {
 
 ### 5.2 Property State Query
 
-The engine provides a query API:
+The engine provides a query API. **`property_at` returns full as-of spatial state, not merely as-of existence** (see §5.4 — this is the closed temporal-position gap from the v1.0 draft, where "reconstructing the property on date X" was ambiguous about whether a still-existing feature's position/geometry as of that date was included):
 
 ```typescript
-// Reconstruct property as-of date
+// Reconstruct property as-of date: every existing feature's position, geometry,
+// dimensions, and containment reflect their values AT as_of_date — not their
+// current (latest) values. A feature moved five times since as_of_date is
+// returned at wherever it stood on that date.
 property_at(property_id: string, as_of_date: ISO8601): Property
 
-// All features active on this date
+// All features that existed (per temporal_envelope) on this date,
+// each resolved to its as-of-date spatial state via the same replay as property_at.
 features_active_at(property_id: string, date: ISO8601): PhysicalFeature[]
 
-// Feature history
-feature_history(feature_id: string): { version, changes, temporal_envelope }[]
+// Full version timeline for one feature: every spatial-attribute-changing
+// event, in order, each with before/after values.
+feature_history(feature_id: string): SpatialChange[]
 ```
 
 ### 5.3 Change Events (for consumers)
 
-When Ymir changes, consumer apps need to know. A simple event stream:
+When Ymir changes, consumer apps need to know. Every spatial write — not just add/remove, but every move, resize, re-geometry, or containment change — emits an event carrying enough detail to reconstruct the prior state:
 
 ```typescript
 interface SpatialChange {
   id: string;
   timestamp: ISO8601;
-  event_kind: "feature_added" | "feature_moved" | "feature_removed" | "area_modified" | ...;
+  event_kind: "feature_added" | "feature_moved" | "feature_resized" | "feature_regeometried"
+            | "feature_removed" | "feature_recontained" | "area_modified" | ...;
   property_id: string;
   affected_ids: string[];        // which features/areas changed
   author?: string;               // user or import source
+  before?: Partial<PhysicalFeature>; // spatial attributes' prior values (position/geometry/dimensions/parent_*)
+  after?: Partial<PhysicalFeature>;  // spatial attributes' new values
   details: Record<string, unknown>;
 }
 ```
+
+### 5.4 Positional Versioning (Canon)
+
+Spatial attributes are versioned, not merely append-only-existent. This closes a gap in the v1.0 draft: temporal envelopes (§5.1) record *when a feature existed*, but said nothing about reconstructing *where it stood* or *how big it was* at a given moment if it moved, was resized, or was re-parented while still active. That is now explicit canon:
+
+- **Mechanism: change-log replay is the authority.** There is no separate per-attribute version-row table. The `spatial_changes` log (§7.3) — one `SpatialChange` event per spatial-attribute-changing write, each carrying `before`/`after` — is the single authoritative record of a feature's spatial state over time. `property_at(date)` and `feature_history()` are both defined purely in terms of replaying this log up to (and including) the target date. A rejected alternative was maintaining explicit version rows per attribute (position_history, geometry_history, ...); replay-from-log was chosen to avoid a combinatorial versioning table per attribute and to keep one log as the single moving part.
+- **Consequence for retention (ties to `RULINGS_NEEDED.md` R-STORE-003, locked as an override):** because historical spatial-state reconstruction depends on full log replay, the change log is retained **forever**, not pruned on a configurable schedule as the v1.0 draft's default recommendation proposed. Pruning the log would silently break `property_at()` for any date before the prune point.
+- **Consumer caching is allowed, the log is not:** consumer apps may materialize and cache computed snapshots (e.g., "the property as of last Tuesday") for performance, but must treat the log as ground truth and invalidate caches on new `SpatialChange` events. Ymir itself may also maintain a materialized "current state" table as a read-optimization, but that table is a projection of the log, never an independent source of truth.
+- **Granularity:** one `SpatialChange` per logical write (R-TIME-003, locked: granular with optional transaction grouping) — a single "move and resize" user action may emit one event carrying both changed attributes, or two events grouped by a shared transaction ID, at the writer's discretion; either replays to the same as-of state.
 
 ---
 
@@ -628,7 +671,7 @@ CREATE TABLE properties (
   description TEXT,
   boundary GEOMETRY NOT NULL,
   boundary_area REAL,
-  coordinate_convention TEXT DEFAULT 'gardenos-local-si-v1',
+  coordinate_convention TEXT DEFAULT 'ymir-local-si-v1',
   wgs84_longitude REAL,
   wgs84_latitude REAL,
   wgs84_altitude_m REAL,
@@ -691,6 +734,8 @@ CREATE TABLE spatial_adjacencies (
 );
 
 -- Change Log
+-- Authoritative log for positional versioning (§5.4). Retained forever
+-- (R-STORE-003, locked override) — property_at(date) depends on full replay.
 CREATE TABLE spatial_changes (
   id TEXT PRIMARY KEY,
   property_id TEXT REFERENCES properties(id),
@@ -698,6 +743,8 @@ CREATE TABLE spatial_changes (
   event_kind TEXT NOT NULL,
   affected_ids TEXT,  -- JSON array
   author TEXT,
+  before JSON,        -- prior values of changed spatial attributes, if any
+  after JSON,         -- new values of changed spatial attributes, if any
   details JSON
 );
 ```
@@ -814,6 +861,8 @@ Future: Users capture photos or point-cloud scans. Ymir will:
 - Allow features to be linked to photos.
 - Does not process or interpret images (that's a consumer tool).
 
+**Amendment (locked, R-FUTURE-002):** the media reference schema accepts three reference kinds — `url`, `local_path`, and `brisingamen_asset_id` — so features can point at assets already living in Brísingamen (the estate's asset system) without a URL/path detour. Full media management tooling remains deferred to v2; only the reference shape is fixed now.
+
 ### 10.3 Maintenance System Deep Integration
 
 Interior app will attach maintenance records to Ymir features:
@@ -911,15 +960,15 @@ The schema is versioned. Breaking changes increment the major version; additions
 ### 12.2 Extension Points (Without Mutation)
 
 New domains extend Ymir by:
-1. Adding new FeatureKind values (e.g., `IRRIGATION_VALVE`).
+1. Using a `domain:<name>` FeatureKind if the core enum (§3.3.1) doesn't already cover it — no schema bump required. Promotion into the core enum is a later, optional, non-breaking step.
 2. Adding new AdjacencyKind values (e.g., `irrigation_line`).
 3. Adding optional metadata fields to Feature.metadata.
 4. Creating their own tables/records that reference Ymir IDs.
 
-Example: Irrigation domain adds a feature `IRRIGATION_VALVE` and links records to the valve ID:
+Example: Irrigation domain adds a feature via the `domain:` escape hatch and links records to it:
 ```typescript
-// Ymir: new feature kind
-feature: { id: "feat_valve", kind: "irrigation_valve" }
+// Ymir: domain-namespaced feature kind, no core schema change needed
+feature: { id: "feat_valve", kind: "domain:irrigation_valve" }
 
 // Irrigation app: own table
 CREATE TABLE valves (
@@ -954,7 +1003,7 @@ Ymir **does not** handle:
 3. **Contain, don't nest metadata.** Spatial data lives in core types; domain operations live in consumer apps.
 4. **Validation is strict; recording is lenient.** Ymir enforces structural rules but records conflicting data if asked (for later reconciliation).
 5. **Time is first-class.** Every spatial fact has a validity interval; the system is inherently historical.
-6. **Coordinate system is invariant.** Property-local SI (meters, gardenos-local-si-v1) is canonical; consumer apps transform as needed.
+6. **Coordinate system is invariant.** Property-local SI (meters, ymir-local-si-v1) is canonical; consumer apps transform as needed.
 7. **No schema pollution.** Domain-specific fields do not enter core types; they extend via specialization or metadata.
 8. **Consumer apps are peers, not hierarchies.** Neither garden nor interior app is "primary"; both read/write through the same Ymir boundary.
 

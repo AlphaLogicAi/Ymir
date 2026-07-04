@@ -1,8 +1,16 @@
 # Ymir — Rulings Needed
 
-**Status:** Open for review · **Session:** Design architecture 2026-07-04
+**Status:** LOCKED — v1.1 · **Session:** Design architecture 2026-07-04 · **Rulings locked:** 2026-07-04
 
-This document lists every significant judgment call, trade-off, and open question that emerged during the design session. These require explicit human decision before implementation begins. Decisions made silently during design are documented here as "decided in session" for audit, not for reversal.
+This document lists every significant judgment call, trade-off, and open question that emerged during the design session. All 26 rulings below are now decided and locked. Most decisions match the session's original recommendation (marked "matches recommendation"); a small number override the recommendation or amend it, called out individually below and summarized here for visibility.
+
+## Overrides and Amendments (Summary)
+
+- **R-STORE-003 (override):** Change log retention is **forever**, not the recommended configurable/default-2-years policy. Reason: positional versioning (`YMIR_SPATIAL_ARCHITECTURE.md` §5.4) makes the log the sole authority for reconstructing spatial state as of a past date — pruning it breaks historical queries before the prune point.
+- **R-DOMAIN-001 (override):** FeatureKind is **hybrid — core enum + `domain:` prefix** — adopted immediately, not deferred until "extensibility becomes painful" as recommended. Two consumer domains already exist; waiting would block them on core schema releases.
+- **R-FUTURE-002 (amendment):** Media references accept **`url`, `local_path`, or `brisingamen_asset_id`** — the recommendation only covered kind/url pairs. Brísingamen is an existing estate asset system; features referencing assets already living there shouldn't need a URL/path detour.
+
+A related non-ruling addition: positional versioning was made explicit canon (§5.4 of the architecture doc) — this closes a gap the original draft left implicit (whether `property_at(date)` returns as-of *existence* only, or full as-of *spatial state*). It is now explicit: full as-of spatial state, via change-log replay as authority.
 
 ---
 
@@ -21,7 +29,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** SQLite for v1 (mature, standard, portable). Revisit if performance testing shows bottlenecks.
 
-**Decision:** [ ] SQLite [ ] JSON [ ] RocksDB [ ] Other ____
+**Decision (LOCKED):** ✅ SQLite — matches recommendation.
 
 ---
 
@@ -37,7 +45,7 @@ This document lists every significant judgment call, trade-off, and open questio
 - **Peer-to-peer / cloud storage sync:** Decentralized, but conflict resolution is hard.
 - **Change log + merge:** Replay changes, CRDT-like, but complex.
 
-**Decision:** [ ] No sync in v1 [ ] Cloud backend [ ] Cloud drive sync [ ] Other ____
+**Decision (LOCKED):** ✅ No sync in v1 — consistent with R-API-001 (library-only for v1); revisit alongside multi-device/service work in v2.
 
 **Related:** R-API-001 (service vs. library).
 
@@ -56,7 +64,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Configurable retention (default: 2 years or 10,000 events).
 
-**Decision:** [ ] Forever [ ] Configurable (____ default) [ ] Snapshot + delta [ ] Other ____
+**Decision (LOCKED — OVERRIDE):** ✅ Forever — overrides the configurable-retention recommendation above. Reason: positional versioning (`YMIR_SPATIAL_ARCHITECTURE.md` §5.4) makes the change log the sole authority for reconstructing a feature's spatial state as of any past date; pruning it would silently break `property_at(date)` for anything before the prune point. Unbounded storage growth is an accepted trade-off against silent historical-query corruption.
 
 ---
 
@@ -73,7 +81,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Strict matching on source_ref; if missing, user must resolve manually or accept duplicates.
 
-**Decision:** [ ] Strict [ ] Fuzzy [ ] Configurable [ ] Other ____
+**Decision (LOCKED):** ✅ Strict matching on source_ref — matches recommendation.
 
 ---
 
@@ -92,7 +100,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** 0.01 m (centimeter) for position and dimensions; degree for heading.
 
-**Decision:** [ ] Millimeter [ ] Centimeter [ ] Decimeter [ ] Other ____
+**Decision (LOCKED):** ✅ Centimeter (0.01 m) for position/dimensions; degree for heading — matches recommendation.
 
 ---
 
@@ -109,7 +117,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** No constraints in v1; offer optional simplification as a consumer app feature.
 
-**Decision:** [ ] No constraints [ ] Auto-simplify (tolerance: ____ m) [ ] Minimum vertices (____ ) [ ] Other ____
+**Decision (LOCKED):** ✅ No constraints in v1 — matches recommendation; consumer apps may offer simplification as a feature.
 
 ---
 
@@ -126,7 +134,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Document practical limit of 3-4 levels; no hard enforcement in v1.
 
-**Decision:** [ ] No limit [ ] Hard limit (depth: ____) [ ] Practical guidance [ ] Other ____
+**Decision (LOCKED):** ✅ Practical guidance (3–4 levels), no hard enforcement — matches recommendation.
 
 ---
 
@@ -143,7 +151,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Degrees only in core schema; consumers derive cardinals. Add computed cardinal as a helper function.
 
-**Decision:** [ ] Degrees only [ ] Computed cardinal [ ] Both [ ] Other ____
+**Decision (LOCKED):** ✅ Degrees only in core schema, with a computed-cardinal helper — matches recommendation. This helper (`exposure_direction()`) is now the canonical way to derive directional exposure rather than storing it redundantly; see the Exposure split in `YMIR_SPATIAL_ARCHITECTURE.md` §4.3.
 
 ---
 
@@ -160,7 +168,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Layered interpretation: features can coexist vertically if layers don't overlap (e.g., roots and canopy of different plants). Ymir records this but doesn't enforce; consumers validate if needed.
 
-**Decision:** [ ] Ignore vertical [ ] Strict 3D [ ] Layered [ ] Other ____
+**Decision (LOCKED):** ✅ Layered interpretation — matches recommendation.
 
 ---
 
@@ -179,7 +187,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Library for v1. Service as an optional layer (v2) for multi-device support.
 
-**Decision:** [ ] Library only [ ] Service only [ ] Both [ ] Other ____
+**Decision (LOCKED):** ✅ Library for v1; service as an optional v2 layer — matches recommendation.
 
 ---
 
@@ -197,7 +205,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Event log table + optional observer pattern. Apps can poll the log or subscribe to callbacks (if library API).
 
-**Decision:** [ ] Polling [ ] Observer [ ] Event log [ ] Webhooks [ ] Other ____
+**Decision (LOCKED):** ✅ Event log table, with an optional observer/callback pattern for library consumers — matches recommendation.
 
 ---
 
@@ -214,7 +222,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Strict by default; provide "force" override for admin operations (user explicitly allows overlap, etc.). Log overrides.
 
-**Decision:** [ ] Strict [ ] Lenient [ ] Flexible with override [ ] Other ____
+**Decision (LOCKED):** ✅ Flexible with override — strict by default, explicit `force` mode for admin operations, all overrides logged — matches recommendation.
 
 ---
 
@@ -233,7 +241,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** ISO 8601 datetime with time optional (default to start of day if omitted).
 
-**Decision:** [ ] Datetime [ ] Date only [ ] User's choice [ ] Other ____
+**Decision (LOCKED):** ✅ ISO 8601 datetime, time-of-day optional (defaults to start of day) — matches recommendation.
 
 ---
 
@@ -250,7 +258,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Property boundary is immutable in v1. If land is subdivided/expanded, it's a new property.
 
-**Decision:** [ ] Static [ ] Temporal [ ] Scope to v1 [ ] Other ____
+**Decision (LOCKED):** ✅ Property boundary is immutable in v1 — matches recommendation. Subdivision/expansion is modeled as a new property, not a mutation of the existing one. (Distinct from R-TIME-003/§5.4's positional versioning of *features* — the property root boundary itself stays out of that mechanism in v1.)
 
 ---
 
@@ -266,7 +274,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Granular with optional transaction grouping (allow apps to group related changes).
 
-**Decision:** [ ] Granular [ ] Batched [ ] Granular with grouping [ ] Other ____
+**Decision (LOCKED):** ✅ Granular, with optional transaction grouping — matches recommendation. This is also the mechanism underlying positional versioning; see `YMIR_SPATIAL_ARCHITECTURE.md` §5.4.
 
 ---
 
@@ -285,7 +293,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Closed enum for v1 (type safety); move to hybrid if extensibility becomes painful.
 
-**Decision:** [ ] Closed enum [ ] Open string [ ] Hybrid with registry [ ] Other ____
+**Decision (LOCKED — OVERRIDE):** ✅ Hybrid — core enum + `domain:` prefix pattern, adopted immediately rather than deferred. Reason: waiting for extensibility to "become painful" means every new domain blocks on a core schema bump before it can model anything; with two consumer domains (garden, interior) already known and more anticipated, the hybrid escape hatch is adopted from v1 instead of retrofitted later. No separate formal registry is required — the `domain:` namespace convention is self-documenting; see `YMIR_SPATIAL_ARCHITECTURE.md` §3.3.1.
 
 ---
 
@@ -302,7 +310,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Core metadata object (`feature.metadata`) with structured subdocuments by domain. Garden domain uses `feature.metadata.garden.*`. Keeps schema clean while allowing strong typing in consumer apps.
 
-**Decision:** [ ] Core field [ ] Metadata [ ] Separate table [ ] Other ____
+**Decision (LOCKED):** ✅ Metadata — structured `feature.metadata.<domain>.*` subdocuments — matches recommendation.
 
 ---
 
@@ -319,7 +327,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Allow UNKNOWN kind; log as a warning during import, but preserve the feature.
 
-**Decision:** [ ] Require defined [ ] Allow UNKNOWN [ ] Custom string [ ] Other ____
+**Decision (LOCKED):** ✅ Allow UNKNOWN, logged as an import warning — matches recommendation.
 
 ---
 
@@ -338,7 +346,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Allow all overlaps. Ymir records; consumer apps implement domain-specific rules. Log overlaps as warnings in debug mode.
 
-**Decision:** [ ] Allow all [ ] Reject some kinds [ ] Strict no-overlap [ ] Other ____
+**Decision (LOCKED):** ✅ Allow all overlaps; Ymir records, consumer apps validate domain-specific rules — matches recommendation.
 
 ---
 
@@ -355,7 +363,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Detect and reject. This is a basic structural invariant.
 
-**Decision:** [ ] Detect and reject [ ] Allow and warn [ ] No check [ ] Other ____
+**Decision (LOCKED):** ✅ Detect and reject — matches recommendation.
 
 ---
 
@@ -373,7 +381,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Centroid containment with optional strict mode. Log warnings if feature is at boundary or apparently outside.
 
-**Decision:** [ ] Strict [ ] Centroid [ ] Warning only [ ] Defer to v2 [ ] Other ____
+**Decision (LOCKED):** ✅ Centroid containment with a warning by default, plus an optional strict mode — matches recommendation. Now reflected as the canonical rule in `YMIR_SPATIAL_ARCHITECTURE.md` §4.4; strict polygon/bounding-box containment is no longer in the engine's default "validates" list.
 
 ---
 
@@ -392,7 +400,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Optional. Outdoor properties should have it for sun calculations; indoor-only can skip. Document the benefit.
 
-**Decision:** [ ] Required [ ] Optional [ ] Domain-specific [ ] Other ____
+**Decision (LOCKED):** ✅ Optional — matches recommendation.
 
 ---
 
@@ -411,7 +419,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Multi-property single-user for v1. Multi-user as a v2+ feature.
 
-**Decision:** [ ] Single-user single-property [ ] Multi-property single-user [ ] Multi-user [ ] Other ____
+**Decision (LOCKED):** ✅ Multi-property, single-user for v1 — matches recommendation.
 
 ---
 
@@ -428,7 +436,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Optional field in v1; defer requirement to multi-user mode (v2).
 
-**Decision:** [ ] Required [ ] Optional [ ] Defer to v2 [ ] Other ____
+**Decision (LOCKED):** ✅ Optional field in v1; becomes required under multi-user mode (v2) — matches recommendation.
 
 ---
 
@@ -447,7 +455,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Fixed schema for v1; validate strictly on import. GeoJSON compatibility (e.g., areas as GeoJSON features) is a nice-to-have for future.
 
-**Decision:** [ ] Fixed schema [ ] Flexible [ ] Multiple formats [ ] Other ____
+**Decision (LOCKED):** ✅ Fixed schema for v1, validated strictly on import; GeoJSON compatibility remains a future nice-to-have — matches recommendation.
 
 ---
 
@@ -465,7 +473,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Reject with clear message and offer to rename the imported property. User then decides.
 
-**Decision:** [ ] Reject [ ] Merge [ ] Replace [ ] Ask user [ ] Other ____
+**Decision (LOCKED):** ✅ Reject with a clear message, offering to rename the imported property — matches recommendation.
 
 ---
 
@@ -484,7 +492,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Ignore in core schema; consumers compute based on vertical_envelope and kind. For interior (stacked shelves), parent-child containment implies order.
 
-**Decision:** [ ] Ignore [ ] Optional z_order [ ] Vertical envelope [ ] Other ____
+**Decision (LOCKED):** ✅ Ignore in core schema; consumers compute z-order from vertical_envelope, kind, and containment — matches recommendation.
 
 ---
 
@@ -502,7 +510,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Optional media_references array with kind/url pairs. Deferred to v2 for full implementation (photo capture tools, asset management).
 
-**Decision:** [ ] URL only [ ] Local path [ ] Asset manifest [ ] Defer to v2 [ ] Other ____
+**Decision (LOCKED — AMENDED):** ✅ Optional `media_references` array, with reference `kind` extended beyond the original recommendation to three values: `url`, `local_path`, and `brisingamen_asset_id`. Amendment reason: Brísingamen (the estate's asset system) is an existing source of media/asset identity; requiring a URL/path detour for assets that already have a Brísingamen ID would be unnecessary indirection. Full media management tooling (capture, asset lifecycle) remains deferred to v2 — only the reference shape is fixed now. See `YMIR_SPATIAL_ARCHITECTURE.md` §10.2.
 
 ---
 
@@ -521,7 +529,7 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Turf.js for TypeScript/JavaScript implementations. Document dependency clearly.
 
-**Decision:** [ ] Turf.js [ ] GEOS [ ] Custom [ ] Other ____
+**Decision (LOCKED):** ✅ Turf.js — matches recommendation.
 
 ---
 
@@ -538,34 +546,34 @@ This document lists every significant judgment call, trade-off, and open questio
 
 **Recommendation:** Upgrade on load for minor versions; require explicit migration for major versions. Document migration path.
 
-**Decision:** [ ] Strict versioning [ ] Upgrade on load [ ] Compatibility layer [ ] Other ____
+**Decision (LOCKED):** ✅ Upgrade-on-load for minor versions; explicit migration required for major versions — matches recommendation.
 
 ---
 
-## Summary of Critical Decisions (Prioritize)
+## Summary of Critical Decisions (Resolved)
 
-These decisions are most critical for the implementation roadmap:
+These were flagged as most critical for the implementation roadmap; all are now locked:
 
-1. **R-STORE-001:** Primary storage medium (SQLite, JSON, RocksDB).
-2. **R-API-001:** Library vs. service API.
-3. **R-GEO-001:** Numeric precision for coordinates.
-4. **R-CONSTRAINT-002:** Circular containment validation.
-5. **R-DOMAIN-001:** Open vs. closed FeatureKind enum.
-6. **R-EXPORT-002:** Import conflict resolution strategy.
-7. **R-IMPL-001:** Geometry library choice.
+1. **R-STORE-001:** SQLite.
+2. **R-API-001:** Library for v1; service optional in v2.
+3. **R-GEO-001:** Centimeter precision.
+4. **R-CONSTRAINT-002:** Detect and reject circular containment.
+5. **R-DOMAIN-001:** Hybrid FeatureKind (core enum + `domain:` prefix) — **override**, adopted immediately rather than deferred.
+6. **R-EXPORT-002:** Reject on ID conflict, offer rename.
+7. **R-IMPL-001:** Turf.js.
 
 ---
 
 ## Next Steps
 
-1. **Stakeholder review:** Gather input on critical decisions above.
-2. **Finalize rulings:** Lock decisions; update this document.
-3. **Produce implementation spec:** Translate rulings into detailed coding guidelines.
-4. **Begin Ymir Core library:** Start with storage and basic types.
-5. **Garden app migration:** Adapt existing garden app to use Ymir as spatial backend.
+1. ~~Stakeholder review~~ — complete; all 26 rulings decided and locked as of 2026-07-04.
+2. ~~Finalize rulings~~ — complete; see decisions and overrides above.
+3. **Produce implementation spec:** Translate locked rulings into detailed coding guidelines.
+4. **Begin Ymir Core library:** Start with storage (SQLite) and core types, including the `spatial_changes` log as the positional-versioning authority (§5.4).
+5. **Garden app migration:** Adapt existing garden app to use Ymir as spatial backend, per the migration path in `YMIR_SPATIAL_ARCHITECTURE.md` §9.
 
 ---
 
-**Document Status:** Open for review. Decisions will be captured as they are made.
+**Document Status:** LOCKED — v1.1. All rulings decided; this document is now a decision record, not an open question list. Future rulings (as new questions arise during implementation) should be appended as new entries rather than reopening the above.
 
 **Last Updated:** 2026-07-04
